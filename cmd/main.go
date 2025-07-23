@@ -10,7 +10,10 @@ import (
 func main() {
 	cfg := config.GetConfig()
 
-	application := app.New(cfg)
+	application, err := app.New(cfg)
+	if err != nil {
+		log.Fatalf("failed to create app: %v", err)
+	}
 
 	if err := application.Run(); err != nil {
 		log.Fatalf("app failed: %v", err)
