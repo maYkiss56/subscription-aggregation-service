@@ -23,6 +23,8 @@ type Config struct {
 		Host     string `yaml:"host"`
 		Port     string `yaml:"port"`
 		Database string `yaml:"database"`
+		SSLMode  string `yaml:"sslmode"`
+		PoolSize int    `yaml:"pool_size"`
 	} `yaml:"postgres"`
 }
 
