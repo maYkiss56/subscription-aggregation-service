@@ -11,18 +11,36 @@ import (
 
 	"github.com/maYkiss56/subscription-aggregation-service/internal/config"
 	"github.com/maYkiss56/subscription-aggregation-service/internal/server"
+	"github.com/maYkiss56/subscription-aggregation-service/pkg/client/postgresql"
 )
 
 type App struct {
-	cfg    *config.Config
-	server *server.Server
+	cfg      *config.Config
+	server   *server.Server
+	pgClient *postgresql.PostgresClient
 }
 
-func New(cfg *config.Config) *App {
-	return &App{
-		cfg:    cfg,
-		server: server.New(cfg),
+func New(cfg *config.Config) (*App, error) {
+	pgCfg := postgresql.PgConfig{
+		Username: cfg.Postgres.Username,
+		Password: cfg.Postgres.Password,
+		Host:     cfg.Postgres.Host,
+		Port:     cfg.Postgres.Port,
+		Database: cfg.Postgres.Database,
+		SSLMode:  cfg.Postgres.SSLMode,
+		PoolSize: cfg.Postgres.PoolSize,
 	}
+
+	pgClient, err := postgresql.New(context.Background(), pgCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create postgres client: %w", err)
+	}
+
+	return &App{
+		cfg:      cfg,
+		server:   server.New(cfg),
+		pgClient: pgClient,
+	}, nil
 }
 
 func (a *App) Run() error {
@@ -31,6 +49,8 @@ func (a *App) Run() error {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go a.databaseHealthCheck(ctx)
 
 	go func() {
 		if err := a.server.Start(ctx); err != nil {
@@ -53,6 +73,24 @@ func (a *App) Run() error {
 		return fmt.Errorf("graceful shutdown failed: %w", err)
 	}
 
+	a.pgClient.Close()
+
 	log.Println("app stopped gracefully")
 	return nil
+}
+
+func (a *App) databaseHealthCheck(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := a.pgClient.HealthCheck(ctx); err != nil {
+				log.Printf("database health check failed: %v", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
