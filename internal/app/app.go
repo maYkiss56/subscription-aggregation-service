@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/maYkiss56/subscription-aggregation-service/internal/config"
+	"github.com/maYkiss56/subscription-aggregation-service/internal/delivery/api/sub"
+	"github.com/maYkiss56/subscription-aggregation-service/internal/repository"
 	"github.com/maYkiss56/subscription-aggregation-service/internal/server"
+	"github.com/maYkiss56/subscription-aggregation-service/internal/service"
 	"github.com/maYkiss56/subscription-aggregation-service/pkg/client/postgresql"
 )
 
@@ -36,9 +39,20 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("failed to create postgres client: %w", err)
 	}
 
+	subRepo := repository.New(pgClient)
+
+	subService := service.New(subRepo)
+
+	subHandler := sub.New(subService)
+
+	router := sub.NewRouter(subHandler)
+
+	srv := server.New(cfg)
+	srv.SetHandler(router)
+
 	return &App{
 		cfg:      cfg,
-		server:   server.New(cfg),
+		server:   srv,
 		pgClient: pgClient,
 	}, nil
 }
