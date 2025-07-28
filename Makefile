@@ -62,7 +62,7 @@ migrate-status:
 ms: migrate-status
 
 swag-init:
-	swag init --parseDependency -g ./cmd/app/main.go -o ./docs
+	swag init --parseDependency -g ./cmd/main.go -o ./docs
 
 si: swag-init
 
