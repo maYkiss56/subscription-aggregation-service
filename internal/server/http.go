@@ -22,12 +22,17 @@ type HTTPServer interface {
 type Server struct {
 	cfg     *config.Config
 	httpSrv *http.Server
+	handler http.Handler
 }
 
 func New(cfg *config.Config) *Server {
 	return &Server{
 		cfg: cfg,
 	}
+}
+
+func (s *Server) SetHandler(handler http.Handler) {
+	s.handler = handler
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -39,7 +44,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.httpSrv = &http.Server{
 		Addr:         addr,
-		Handler:      nil,
+		Handler:      s.handler,
 		ReadTimeout:  s.cfg.HTTP.ReadTimeout,
 		WriteTimeout: s.cfg.HTTP.WriteTimeout,
 	}
