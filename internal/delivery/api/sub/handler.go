@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/maYkiss56/subscription-aggregation-service/internal/domain"
+	"github.com/maYkiss56/subscription-aggregation-service/internal/utils"
 )
 
 const (
@@ -39,6 +40,17 @@ func New(service SubService) *HandlerSub {
 	}
 }
 
+// CreateSub godoc
+// @Summary Create a new subscription
+// @Description Create a new subscription with the input payload
+// @Tags subscriptions
+// @Accept  json
+// @Produce  json
+// @Param input body domain.CreateSubRequest true "Create subscription"
+// @Success 201 {object} map[string]interface{} "Subscription created"
+// @Failure 400 {string} string "Invalid input"
+// @Failure 500 {string} string "Internal server error"
+// @Router /create [post]
 func (h *HandlerSub) CreateSub(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateSubRequest
 	defer r.Body.Close()
@@ -48,7 +60,21 @@ func (h *HandlerSub) CreateSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newSub, err := domain.New(req.ServiceName, req.Price, req.UserID, req.StartDate, req.EndDate)
+	// Парсим start_date как первый день месяца
+	startDate, err := utils.ParseMonthYear(req.StartDate)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid start date: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Парсим end_date как последний день месяца
+	endDate, err := utils.ParseMonthYearToEndOfMonth(req.EndDate)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid end date: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	newSub, err := domain.New(req.ServiceName, req.Price, req.UserID, startDate, endDate)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("%s: %v", ErrInvalidSubData, err), http.StatusBadRequest)
 		return
@@ -70,6 +96,15 @@ func (h *HandlerSub) CreateSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetAllSubs godoc
+// @Summary Get all subscriptions
+// @Description Get list of all subscriptions
+// @Tags subscriptions
+// @Accept  json
+// @Produce  json
+// @Success 200 {array} domain.Sub "List of subscriptions"
+// @Failure 500 {string} string "Internal server error"
+// @Router / [get]
 func (h *HandlerSub) GetAllSubs(w http.ResponseWriter, r *http.Request) {
 	subs, err := h.service.GetAllSubs(r.Context())
 	if err != nil {
@@ -77,13 +112,26 @@ func (h *HandlerSub) GetAllSubs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	response := domain.ConvertSubsToResponse(subs)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(subs); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, fmt.Sprintf("%s: %v", ErrInternalServer, err), http.StatusInternalServerError)
 	}
 }
 
+// GetSubByUserID godoc
+// @Summary Get subscriptions by user ID
+// @Description Get list of subscriptions for specific user
+// @Tags subscriptions
+// @Accept  json
+// @Produce  json
+// @Param user_id path string true "User ID"
+// @Success 200 {array} domain.Sub "List of user subscriptions"
+// @Failure 400 {string} string "Invalid user ID"
+// @Failure 500 {string} string "Internal server error"
+// @Router /{user_id} [get]
 func (h *HandlerSub) GetSubByUserID(w http.ResponseWriter, r *http.Request) {
 	userIDStr := chi.URLParam(r, "user_id")
 	userID, err := uuid.Parse(userIDStr)
@@ -98,13 +146,28 @@ func (h *HandlerSub) GetSubByUserID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	response := domain.ConvertSubsToResponse(subs)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(subs); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, fmt.Sprintf("%s: %v", ErrInternalServer, err), http.StatusInternalServerError)
 	}
 }
 
+// UpdateSub godoc
+// @Summary Update subscription
+// @Description Update existing subscription
+// @Tags subscriptions
+// @Accept  json
+// @Produce  json
+// @Param id path string true "Subscription ID"
+// @Param input body domain.UpdateSubRequest true "Update data"
+// @Success 200 {object} domain.Sub "Updated subscription"
+// @Failure 400 {string} string "Invalid input"
+// @Failure 404 {string} string "Subscription not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /update/{id} [patch]
 func (h *HandlerSub) UpdateSub(w http.ResponseWriter, r *http.Request) {
 	subIDStr := chi.URLParam(r, "id")
 	subID, err := uuid.Parse(subIDStr)
@@ -120,19 +183,52 @@ func (h *HandlerSub) UpdateSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Преобразуем даты перед передачей в сервис
+	if req.StartDate != nil {
+		startDate, err := utils.ParseMonthYear(*req.StartDate)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid start date: %v", err), http.StatusBadRequest)
+			return
+		}
+		*req.StartDate = startDate.Format("2006-01-02") // Преобразуем в YYYY-MM-DD
+	}
+
+	if req.EndDate != nil {
+		endDate, err := utils.ParseMonthYearToEndOfMonth(*req.EndDate)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid end date: %v", err), http.StatusBadRequest)
+			return
+		}
+		*req.EndDate = endDate.Format("2006-01-02") // Преобразуем в YYYY-MM-DD
+	}
+
 	updatedSub, err := h.service.UpdateSub(r.Context(), subID, &req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to update subscription: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	response := domain.ConvertSubToResponse(updatedSub)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(updatedSub); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, fmt.Sprintf("%s: %v", ErrInternalServer, err), http.StatusInternalServerError)
 	}
 }
 
+// DeleteSub godoc
+// @Summary Delete subscription
+// @Description Delete existing subscription
+// @Tags subscriptions
+// @Accept  json
+// @Produce  json
+// @Param id path string true "Subscription ID"
+// @Success 204 "No content"
+// @Failure 400 {string} string "Invalid subscription ID"
+// @Failure 404 {string} string "Subscription not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /delete/{id} [delete]
 func (h *HandlerSub) DeleteSub(w http.ResponseWriter, r *http.Request) {
 	subIDStr := chi.URLParam(r, "id")
 	subID, err := uuid.Parse(subIDStr)
@@ -149,6 +245,17 @@ func (h *HandlerSub) DeleteSub(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// CalculateTotalCost godoc
+// @Summary Calculate total cost
+// @Description Calculate total cost of subscriptions for given period
+// @Tags subscriptions
+// @Accept  json
+// @Produce  json
+// @Param input body domain.TotalCostFilter true "Filter parameters"
+// @Success 200 {object} map[string]int "Total cost"
+// @Failure 400 {string} string "Invalid input"
+// @Failure 500 {string} string "Internal server error"
+// @Router /total [post]
 func (h *HandlerSub) CalculateTotalCost(w http.ResponseWriter, r *http.Request) {
 	var filter domain.TotalCostFilter
 	defer r.Body.Close()
@@ -157,14 +264,23 @@ func (h *HandlerSub) CalculateTotalCost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if filter.StartPeriod.IsZero() || filter.EndPeriod.IsZero() {
-		http.Error(w, ErrInvalidDateRange, http.StatusBadRequest)
-		return
+	// Преобразуем даты в формат, понятный БД
+	if filter.StartPeriod != "" {
+		startDate, err := utils.ParseMonthYear(filter.StartPeriod)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid start period: %v", err), http.StatusBadRequest)
+			return
+		}
+		filter.StartPeriod = startDate.Format("2006-01-02") // Преобразуем в YYYY-MM-DD
 	}
 
-	if filter.EndPeriod.Before(filter.StartPeriod) {
-		http.Error(w, "end period must be after start period", http.StatusBadRequest)
-		return
+	if filter.EndPeriod != "" {
+		endDate, err := utils.ParseMonthYearToEndOfMonth(filter.EndPeriod)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid end period: %v", err), http.StatusBadRequest)
+			return
+		}
+		filter.EndPeriod = endDate.Format("2006-01-02") // Преобразуем в YYYY-MM-DD
 	}
 
 	total, err := h.service.CalculateTotalCost(r.Context(), filter)
